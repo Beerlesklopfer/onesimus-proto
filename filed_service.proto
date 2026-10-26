@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.filed;
+
+// Stateful Director/File Daemon control connection. File contents continue to
+// travel directly between File Daemon and Storage Daemon over BNET.
+// The existing Hello and mutual CRAM authentication run inside this TLS stream;
+// no command is executed before authentication succeeds.
+service FileDaemon {
+  rpc Control(stream ControlFrame) returns (stream ControlFrame);
+}
+
+// Preserve control message boundaries, binary restore objects and flow-control
+// signals. No BNET length headers are transmitted over gRPC.
+message ControlFrame {
+  oneof frame {
+    bytes payload = 1;
+    int32 signal = 2;
+  }
+}

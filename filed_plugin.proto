@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.filed.plugin.v1;
+
+import "plugin_ccc.proto";
+
+// Typed payloads for Rust-authored WASM components. The implemented Wasmtime
+// host uses wit/filed-plugin.wit: initialize, handle-event, next-file, read-file,
+// write-file, close-file and shutdown each accept/return list<u8> containing the
+// corresponding protobuf request/response. The host validates instance/job
+// binding, lifecycle phase and payload sizes, and enforces fuel, memory limits
+// and epoch interruption. No WASI, filesystem, network or process imports are
+// provided. Python, shell and native-library execution are not fallback paths.
+// FileDaemonPlugin is the typed service contract; a gRPC server adapter and
+// Docker/Podman broker are not implemented.
+// This API is separate from onesimus.filed.FileDaemon.Control, which transports
+// the authenticated Director/FD control dialogue. DIR/FD retains BNET fallback;
+// FD/SD data transport remains BNET. Neither fallback relaxes plugin validation.
+// Execution is instance-scoped: different instances/devices may execute in
+// parallel with Director/device workers. Mutating calls within one instance
+// are ordered by its host executor. No global plugin/device lock may be held
+// over I/O. Bounded queues enforce max_pending_operations and backpressure;
+// overload must reject/defer admission rather than grow an unbounded queue.
+// Cancellation and shutdown use an independent control path and must remain
+// reachable when an ordinary operation or its normal queue is blocked. The
+// Wasmtime host interrupts the owning store out of band. A broader worker/
+// device broker must preserve these ordering and bounded-admission contracts.
+service FileDaemonPlugin {
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+  rpc HandleEvent(EventRequest) returns (OperationResult);
+  rpc NextFile(NextFileRequest) returns (NextFileResponse);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (OperationResult);
+  rpc CloseFile(CloseFileRequest) returns (OperationResult);
+  rpc Cancel(CancelRequest) returns (OperationResult);
+  rpc Shutdown(ShutdownRequest) returns (OperationResult);
+}
+
+// This is an artifact envelope, NOT an authorization decision. Before any
+// initialization the host verifies signature, trust/revocation, validity,
+// artifact SHA-256, supported schema/API/target and local capability policy.
+// Missing/unknown values fail closed. Verification and opening the artifact
+// must operate on the same immutable bytes (avoid path replacement/TOCTOU).
+message SignedPluginArtifact {
+  // Exact UTF-8 JSON manifest bytes signed with Ed25519. Never decode then
+  // reserialize for verification. JSON keys: schema_version (u32), plugin_id,
+  // version, api_version (u32), artifact_sha256 (hex SHA-256), signing_key_id,
+  // not_before/not_after (Unix u64 seconds), capabilities (string array), target.
+  // signing_key_id is lowercase hex SHA-256 of DER SubjectPublicKeyInfo:
+  // renewal with the same key preserves the ID; key rotation changes it.
+  // Signature binds ALL manifest fields, including the artifact hash, identity,
+  // permissions and validity. Duplicate keys/unsupported schemas are rejected.
+  bytes manifest_bytes = 1;
+  // Exactly 64 bytes. Verify with the Ed25519 leaf public key only after its
+  // X.509 chain is validated against the host trust store. signing_key_id is
+  // an untrusted selector until its SPKI hash and certificate are verified.
+  bytes ed25519_signature = 2;
+  // WASM component bytes whose SHA-256 must equal artifact_sha256. Deployment
+  // may transfer this envelope out of band; it is not part of Initialize.
+  bytes artifact_bytes = 3;
+  // Public DER X.509 certificates, leaf first. A bundled root never becomes a
+  // trust anchor: only the configured host CA store grants trust. No private
+  // key is transferred or installed on the daemon; signing is build-side only.
+  // Require leaf codeSigning EKU and digitalSignature key usage, valid chain
+  // and certificate times, and no locally revoked SPKI/certificate fingerprint.
+  // The host additionally enforces allowed plugin IDs and capabilities under
+  // its trust policy. This contract does not imply network CRL/OCSP fetching.
+  repeated bytes x509_certificate_chain_der = 4;
+}
+
+message OperationResult {
+  onesimus.ccc.ReturnCode code = 1;
+  string diagnostic = 2;
+}
+
+// Issued by the host only after full verification. A plugin must not be able to
+// self-authorize by constructing this message. The authenticated local adapter
+// binds an opaque instance_id to the verified artifact and granted permissions.
+message InitializeRequest {
+  string instance_id = 1;
+  string plugin_id = 2;
+  string version = 3;
+  uint32 api_version = 4;
+  repeated string granted_capabilities = 5;
+  map<string, string> options = 6;
+  ResourceLimits limits = 7;
+  ExecutionBinding binding = 8;
+}
+// Host-assigned logical identities bind this instance to its job/device worker.
+// IDs are opaque labels, never native thread handles or authority supplied by
+// a plugin. The host validates the binding before admission and dispatch.
+message ExecutionBinding {
+  JobContext job = 1;
+  string device_id = 2;
+  string worker_id = 3;
+}
+
+// Every limit must be nonzero and bounded by host policy; zero never means
+// unlimited. The host enforces limits independently of plugin cooperation.
+message ResourceLimits {
+  uint64 memory_bytes = 1;
+  uint64 operation_timeout_millis = 2;
+  uint32 max_open_files = 3;
+  uint32 max_chunk_bytes = 4;
+  uint32 max_pending_operations = 5;
+}
+message InitializeResponse {
+  OperationResult result = 1;
+  // Must match the verified manifest; metadata never grants permissions.
+  onesimus.ccc.PluginMetadata metadata = 2;
+}
+// A successful JobStarted must precede file operations for this job; terminal
+// events revoke its handles. Unknown instances/jobs and wrong-operation calls
+// are rejected. An operation result with an unspecified code is not success.
+message JobContext {
+  uint64 job_id = 1;
+  string job_name = 2;
+  JobOperation operation = 3;
+}
+enum JobOperation {
+  JOB_OPERATION_UNSPECIFIED = 0;
+  JOB_OPERATION_BACKUP = 1;
+  JOB_OPERATION_RESTORE = 2;
+}
+message EventRequest {
+  string instance_id = 1;
+  JobContext job = 2;
+  oneof event {
+    JobStarted started = 3;
+    JobFinished finished = 4;
+    JobCancelled cancelled = 5;
+  }
+}
+message JobStarted {}
+message JobFinished { bool succeeded = 1; }
+message JobCancelled { string reason = 1; }
+
+// Paths are byte strings to preserve non-UTF-8 POSIX filenames. Encoding and
+// platform must match the certified target. The host enforces granted roots,
+// symlink traversal and filesystem permissions independently of plugin input.
+message FileEntry {
+  bytes path = 1;
+  FileKind kind = 2;
+  uint64 size = 3;
+  int64 modified_unix_nanos = 4;
+  uint32 mode = 5;
+  bytes symlink_target = 6;
+}
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  FILE_KIND_REGULAR = 1;
+  FILE_KIND_DIRECTORY = 2;
+  FILE_KIND_SYMLINK = 3;
+}
+// Scan state is scoped to (instance_id, job_id). Callers serialize NextFile
+// calls. Exhaustion is explicit and distinct from an error/empty file.
+message NextFileRequest {
+  string instance_id = 1;
+  uint64 job_id = 2;
+}
+message NextFileResponse {
+  OperationResult result = 1;
+  oneof item {
+    FileEntry file = 2;
+    ScanComplete complete = 3;
+  }
+}
+message ScanComplete {}
+// File operations are scoped to a job; no raw OS descriptors cross the boundary.
+// The implementation must authorize each path and enforce max_chunk_bytes.
+// Explicit offsets permit bounded requests without unbounded stream buffering.
+message ReadFileRequest {
+  string instance_id = 1;
+  uint64 job_id = 2;
+  bytes path = 3;
+  uint64 offset = 4;
+  uint32 max_bytes = 5;
+}
+message ReadFileResponse {
+  OperationResult result = 1;
+  bytes data = 2;
+  bool eof = 3;
+}
+message WriteFileRequest {
+  string instance_id = 1;
+  uint64 job_id = 2;
+  FileEntry file = 3;
+  uint64 offset = 4;
+  bytes data = 5;
+}
+// Completes one file, including metadata application on restore. Explicit
+// abort discards incomplete output where supported. Retry semantics are a
+// runtime responsibility; mutating calls must not be blindly replayed.
+message CloseFileRequest {
+  string instance_id = 1;
+  uint64 job_id = 2;
+  bytes path = 3;
+  bool abort = 4;
+}
+// Cancel is out-of-band: acceptance requests cancellation but does not claim
+// work has already stopped. Cancellation interrupts/releases the owning store
+// without relying on guest hooks. A future lifecycle adapter must deliver
+// JobCancelled after settling in-flight work and revoke the job handles.
+message CancelRequest {
+  string instance_id = 1;
+  uint64 job_id = 2;
+  string reason = 3;
+}
+// Shutdown also bypasses a blocked normal queue. The host must settle/cancel
+// in-flight work before releasing instance resources. The WIT shutdown export
+// is validated, but its idle cleanup hook is not yet invoked by the host; store
+// release on cancellation/traps never depends on successful guest cleanup.
+message ShutdownRequest { string instance_id = 1; }

@@ -1,7 +1,7 @@
 # onesimus-proto
 
 Protocol Buffer definitions for the Onesimus Director gRPC interface: the
-contract between the Onesimus Director (`onesimus-dird`), the Onesimus
+contract between the Onesimus Director (`odir`), the Onesimus
 console (`oconsole`, including its MCP server) and the Onesimus GUI.
 
 The gRPC interface complements the classic console protocol: the Onesimus
@@ -34,9 +34,9 @@ API 2 JSON output (`.api 2`); values without a typed field are kept in
 `extra_fields`.
 
 - Read RPCs (list/llist, status, show, dot listings, BVFS/OVFS queries) are
-  implemented by onesimus-dird in every build.
+  implemented by odir in every build.
 - Write, session and restore-tree RPCs are implemented only in the
-  onesimus-dird development build (cargo feature `grpc-development`); the
+  odir development build (cargo feature `grpc-development`); the
   production build answers `UNIMPLEMENTED`. Each runs one non-interactive
   console command and returns `ActionResponse` (text, errors, job ids and
   the typed job/volume/pool records after the change). Destructive RPCs
