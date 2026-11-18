@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.filed.broker.postgresql.v1;
+
+// The PostgreSQL broker of the signed "postgresql" plugin
+// (docs/plans/POSTGRESQL-PHASE2.md). Two hops use these messages:
+//
+// guest -> host: the optional WIT import onesimus:broker/postgresql, one
+//   function per request type, each taking and returning the encoded
+//   message. The host links it only when the verified manifest and the
+//   policy grant "postgresql.read", and checks every request (database in
+//   the allowed set, catalog database excluded) before forwarding it.
+// host -> broker: frames on the broker's fd 0/1, each a 4-byte big-endian
+//   length and a BrokerRequest / BrokerResponse.
+//
+// There is no free-form query, path, command or option: the broker runs
+// fixed client programs of the instance's major version with fixed
+// arguments over the local socket (peer authentication).
+
+message InfoRequest {}
+message Database {
+  string name = 1;
+  string owner = 2;
+  string encoding = 3;
+  uint64 size_bytes = 4;
+  bool allow_connections = 5;
+  bool is_template = 6;
+}
+message InfoResponse {
+  string server_version = 1;
+  uint32 major = 2;
+  repeated Database databases = 3;
+}
+
+message DatabaseInfoRequest { string database = 1; }
+message Table {
+  string schema = 1;
+  string name = 2;
+  uint64 estimated_rows = 3;
+  uint64 size_bytes = 4;
+}
+message DatabaseInfoResponse {
+  string database = 1;
+  repeated string extensions = 2;
+  repeated string schemas = 3;
+  repeated Table tables = 4;
+}
+
+// pg_dump -Fc of one database, or pg_dumpall --globals-only.
+message DumpOpenRequest {
+  oneof what {
+    string database = 1;
+    GlobalsOnly globals = 2;
+  }
+}
+message GlobalsOnly {}
+message DumpOpenResponse { uint32 handle = 1; }
+
+message DumpReadRequest {
+  uint32 handle = 1;
+  uint32 max_bytes = 2;
+}
+message DumpReadResponse {
+  bytes data = 1;
+  // The dump ended; `exit_ok` tells whether the dump program succeeded.
+  bool eof = 2;
+  bool exit_ok = 3;
+  string diagnostic = 4;
+}
+
+message DumpCloseRequest { uint32 handle = 1; }
+message DumpCloseResponse {}
+
+message BrokerRequest {
+  oneof request {
+    InfoRequest info = 1;
+    DatabaseInfoRequest database_info = 2;
+    DumpOpenRequest dump_open = 3;
+    DumpReadRequest dump_read = 4;
+    DumpCloseRequest dump_close = 5;
+  }
+}
+message BrokerError { string message = 1; }
+message BrokerResponse {
+  oneof response {
+    InfoResponse info = 1;
+    DatabaseInfoResponse database_info = 2;
+    DumpOpenResponse dump_open = 3;
+    DumpReadResponse dump_read = 4;
+    DumpCloseResponse dump_close = 5;
+    BrokerError error = 15;
+  }
+}
