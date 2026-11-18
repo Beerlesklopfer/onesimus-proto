@@ -145,12 +145,19 @@ message FileEntry {
   int64 modified_unix_nanos = 4;
   uint32 mode = 5;
   bytes symlink_target = 6;
+  // Display and search metadata of a virtual entry (e.g. database name, DN,
+  // object class). Not file content and never a secret. The host bounds the
+  // count and lengths; older plugins leave it empty.
+  map<string, string> attributes = 7;
 }
 enum FileKind {
   FILE_KIND_UNSPECIFIED = 0;
   FILE_KIND_REGULAR = 1;
   FILE_KIND_DIRECTORY = 2;
   FILE_KIND_SYMLINK = 3;
+  // Regular content produced by the plugin with no filesystem object behind
+  // it (a database dump, an LDAP entry). Restored to files like REGULAR.
+  FILE_KIND_VIRTUAL = 4;
 }
 // Scan state is scoped to (instance_id, job_id). Callers serialize NextFile
 // calls. Exhaustion is explicit and distinct from an error/empty file.
