@@ -149,6 +149,16 @@ message FileEntry {
   // object class). Not file content and never a secret. The host bounds the
   // count and lengths; older plugins leave it empty.
   map<string, string> attributes = 7;
+  // api_version 2 (docs/plans/PODMAN-PLUGIN.md, "Erweiterung von FileEntry"):
+  // a reference to a scan entry of the host (a volume file, an image blob,
+  // ownership.tsv). Empty for a synthetic entry whose bytes the guest
+  // delivers through ReadFile. With a reference the guest delivers neither
+  // bytes nor attributes: the host reads both itself from its scan table,
+  // ReadFile is never called for the entry, and size, mode and time given
+  // by the guest are ignored. Each reference is valid once, in this job and
+  // this instance only; the path must be the object's prefix plus the
+  // entry's relative path or digest.
+  bytes source_ref = 8;
 }
 enum FileKind {
   FILE_KIND_UNSPECIFIED = 0;
@@ -158,6 +168,10 @@ enum FileKind {
   // Regular content produced by the plugin with no filesystem object behind
   // it (a database dump, an LDAP entry). Restored to files like REGULAR.
   FILE_KIND_VIRTUAL = 4;
+  // api_version 2, only with source_ref: a FIFO, and a hard link to an
+  // entry saved before in the same job (FT_LNKSAVED).
+  FILE_KIND_FIFO = 5;
+  FILE_KIND_HARDLINK = 6;
 }
 // Scan state is scoped to (instance_id, job_id). Callers serialize NextFile
 // calls. Exhaustion is explicit and distinct from an error/empty file.
