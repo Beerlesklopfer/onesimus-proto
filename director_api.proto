@@ -302,6 +302,16 @@ service DirectorApi {
   rpc ConfigureExport (onesimus.director.commands.ConfigureExportCommand) returns (ActionResponse);
   rpc ConfigureDelete (onesimus.director.commands.ConfigureDeleteCommand) returns (ActionResponse);
   rpc ConfigureUpdate (onesimus.director.commands.ConfigureUpdateCommand) returns (ActionResponse);
+
+  // --- Konfiguration: Ressourcen lesen, anlegen, ändern, löschen ----------
+  // Onesimus-Erweiterung, kein Gegenstück in bareos-dir.
+  rpc GetConfigCapabilities (ConfigCapabilitiesRequest) returns (ConfigCapabilitiesResponse);
+  rpc ReadResource (ReadResourceRequest) returns (ResourceResponse);
+  rpc CreateResource (CreateResourceRequest) returns (ResourceResponse);
+  rpc UpdateResource (UpdateResourceRequest) returns (ResourceResponse);
+  rpc DeleteResource (DeleteResourceRequest) returns (ResourceResponse);
+  rpc RenameResource (RenameResourceRequest) returns (ResourceResponse);  // später; bis dahin UNIMPLEMENTED
+  rpc ListResources (ListResourcesRequest) returns (ListResourcesResponse);
   rpc Reload (onesimus.director.commands.ReloadCommand) returns (ActionResponse);
   rpc SetDebug (SetDebugLevelCommand) returns (ActionResponse);
   rpc SetBandwidth (SetBandwidthLimitCommand) returns (ActionResponse);
@@ -2377,4 +2387,140 @@ message RestoreTreeCountResponse {
   uint64 marked = 2;
   uint64 bytes = 3;              // estimate
   string text = 4;
+}
+
+// ==========================================================================
+// Konfiguration: Ressourcen lesen, anlegen, ändern, löschen (CRUD)
+// Onesimus-Erweiterung, siehe docs/plans/CONFIG-CRUD-GRPC.md im Director.
+// ==========================================================================
+
+enum ResourceType {
+  RESOURCE_TYPE_UNSPECIFIED = 0;
+  RESOURCE_TYPE_SCHEDULE = 1;
+  RESOURCE_TYPE_JOB = 2;
+  RESOURCE_TYPE_JOBDEFS = 3;
+  RESOURCE_TYPE_CLIENT = 4;
+  RESOURCE_TYPE_FILESET = 5;
+  RESOURCE_TYPE_POOL = 6;
+  RESOURCE_TYPE_STORAGE = 7;
+  RESOURCE_TYPE_MESSAGES = 8;
+  RESOURCE_TYPE_CATALOG = 9;
+  RESOURCE_TYPE_CONSOLE = 10;
+  RESOURCE_TYPE_PROFILE = 11;
+  RESOURCE_TYPE_COUNTER = 12;
+  RESOURCE_TYPE_USER = 13;
+  RESOURCE_TYPE_DIRECTOR = 14;
+}
+
+enum ConfigOperation {
+  CONFIG_OPERATION_UNSPECIFIED = 0;
+  CONFIG_OPERATION_READ_RAW = 1;
+  CONFIG_OPERATION_CREATE_RAW = 2;
+  CONFIG_OPERATION_UPDATE_RAW = 3;
+  CONFIG_OPERATION_DELETE = 4;
+  CONFIG_OPERATION_RENAME = 5;
+}
+
+enum ConfigStatus {
+  CONFIG_STATUS_UNSPECIFIED = 0;
+  CONFIG_STATUS_OK = 1;
+  CONFIG_STATUS_CONFLICT = 2;    // expected_sha256 passt nicht; text/sha256 = aktueller Stand
+  CONFIG_STATUS_INVALID = 3;     // neue Konfiguration ungültig; problem gesetzt, nichts geändert
+  CONFIG_STATUS_REFERENCED = 4;  // Löschen verweigert; referenced_by gesetzt
+  CONFIG_STATUS_DENIED = 5;      // Ressourcen-ACL
+  CONFIG_STATUS_NOT_FOUND = 6;
+  CONFIG_STATUS_EXISTS = 7;      // Create: Name vergeben
+  CONFIG_STATUS_RELOAD_FAILED = 8; // geschrieben, Reload scheiterte, alter Stand wiederhergestellt
+}
+
+message ResourceRef {
+  ResourceType type = 1;
+  string name = 2;
+}
+
+message ConfigCapabilitiesRequest {
+  option (onesimus.command_name) = "configure capabilities";
+}
+
+message TypeCapabilities {
+  ResourceType type = 1;
+  repeated ConfigOperation operations = 2;
+}
+
+message ConfigCapabilitiesResponse {
+  uint32 interface_version = 1;        // 1 = diese Fassung
+  repeated TypeCapabilities types = 2;
+}
+
+message ReadResourceRequest {
+  option (onesimus.command_name) = "configure read";
+  ResourceRef resource = 1;
+}
+
+message CreateResourceRequest {
+  option (onesimus.command_name) = "configure create";
+  ResourceType type = 1;
+  string text = 2;                     // vollständige Ressource "Schedule { Name = ...; ... }"
+  bool validate_only = 3;              // nur prüfen, nichts schreiben, kein Reload
+}
+
+message UpdateResourceRequest {
+  option (onesimus.command_name) = "configure update";
+  ResourceRef resource = 1;
+  string expected_sha256 = 2;          // SHA-256 (hex) des Textes, auf dem die Änderung beruht
+  string text = 3;                     // neuer vollständiger Text; Name muss resource.name sein
+  bool validate_only = 4;
+}
+
+message DeleteResourceRequest {
+  option (onesimus.command_name) = "configure delete";
+  ResourceRef resource = 1;
+  string expected_sha256 = 2;
+  bool validate_only = 3;
+}
+
+message ListResourcesRequest {
+  option (onesimus.command_name) = "configure list";
+  ResourceType type = 1;
+}
+
+message ResourceSummary {
+  ResourceRef resource = 1;
+  string file = 2;
+  string sha256 = 3;
+  bool shared_file = 4;
+}
+
+message ListResourcesResponse {
+  repeated ResourceSummary resources = 1;
+}
+
+message RenameResourceRequest {
+  option (onesimus.command_name) = "configure rename";
+  ResourceRef resource = 1;
+  string new_name = 2;
+  string expected_sha256 = 3;
+}
+
+message ConfigProblem {
+  string file = 1;
+  uint32 line = 2;
+  uint32 column = 3;
+  string text = 4;                     // Meldung wie bei odir -t
+}
+
+message ResourceResponse {
+  ConfigStatus status = 1;
+  string message = 2;                  // lesbare Meldung
+  ResourceRef resource = 3;
+  string file = 4;                     // Pfad der Datei
+  string text = 5;                     // Rohtext der Ressource (aktueller Stand)
+  string sha256 = 6;                   // SHA-256 (hex) von text
+  bool shared_file = 7;                // Datei enthält weitere Ressourcen
+  repeated ResourceRef referenced_by = 8;
+  ConfigProblem problem = 9;           // bei INVALID
+  bool reloaded = 10;                  // Konfiguration neu geladen
+  bool validated_only = 11;            // Antwort auf validate_only, nichts geschrieben
+  string old_sha256 = 12;              // Stand vor der Änderung (schreibende Operationen)
+  repeated string followups = 13;      // was der Reload nicht angleicht, als Konsolenbefehle
 }
