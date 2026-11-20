@@ -182,8 +182,9 @@ message SdStatusEvent {
 message JobStatusEvent {
   uint32 job_id = 1;
   string job_name = 2;
-  string status = 3;       // e.g. "Running", "OK", "Error", "Canceled"
-  int64 timestamp = 4;     // unix timestamp
+  string status = 3;       // Queued, Running (tatsaechlicher Start), Canceling, Success, Error
+  int64 timestamp = 4;     // unix timestamp des Ereignisses
+  int64 sched_time = 5;    // unix timestamp der geplanten Startzeit, 0 = unbekannt
 }
 
 // Wrapper for all push events (server -> client via InteractiveSession)

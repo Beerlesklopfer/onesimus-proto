@@ -561,6 +561,7 @@ message ListJobsCommand {
   uint32 limit = 12;
   uint32 offset = 13;
   bool llist = 14;  // Langform (llist)
+  bool reverse = 15 [(onesimus.bare_flag) = true];  // neueste zuerst (ORDER BY StartTime DESC), mit limit/offset
 }
 
 // list jobid=<id> | list ujobid=<name>
@@ -1848,6 +1849,8 @@ message RunningJobInfo {
   string status = 5;             // Statustext
   uint64 files = 6;
   uint64 bytes = 7;
+  int64 start_time = 8;          // Unix-Zeit des tatsaechlichen Starts, 0 = noch nicht gestartet
+  int64 sched_time = 9;          // Unix-Zeit der geplanten Startzeit, 0 = unbekannt
   map<string, string> extra_fields = 100;
 }
 
