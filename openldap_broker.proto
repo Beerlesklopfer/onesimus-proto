@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.filed.broker.openldap.v1;
+
+// The OpenLDAP broker of the signed "openldap" plugin
+// (docs/plans/OPENLDAP-PLUGIN.md). Two hops use these messages:
+//
+// guest -> host: the optional WIT imports onesimus:filed-plugin/openldap
+//   (capability "openldap.read": info, dump-open, dump-read, dump-close,
+//   config-file-open) and onesimus:filed-plugin/openldap-restore
+//   (capability "openldap.write": load-open, load-write, load-close, real
+//   only in a restore job with restore_mode=online). Each function takes and
+//   returns one encoded message. The host checks every request (suffix in
+//   the selected set, configuration file id from the info list, handles it
+//   opened, restore target it created) before it reaches the broker.
+// host -> broker: frames on the broker's fd 0/1, each a 4-byte big-endian
+//   length and a BrokerRequest / BrokerResponse.
+//
+// There is no free-form path, filter, command or option: the broker runs
+// slapcat / slapadd / slapd -VV from a fixed directory with fixed arguments
+// as the instance's user, and reads configuration files only by the id of
+// its own info list. Diagnostics of the tools are never passed on verbatim
+// (an slapadd error quotes LDIF lines, which may hold secrets).
+
+enum ConfigKind {
+  CONFIG_KIND_UNSPECIFIED = 0;
+  // Online configuration: slapd.d (cn=config), slapcat -n 0.
+  CONFIG_KIND_SLAPD_D = 1;
+  // File configuration: slapd.conf and its include files.
+  CONFIG_KIND_SLAPD_CONF = 2;
+}
+
+message InfoRequest {}
+
+message Database {
+  // n of olcDatabase={n}<backend>, or the position in slapd.conf
+  // (config = 0). Informational only: dumps always select by suffix.
+  int32 number = 1;
+  string backend = 2;
+  string suffix = 3;
+  string directory = 4;
+  repeated string overlays = 5;
+  // Set by the host in the answer to the guest: this plugin line dumps it.
+  bool selected = 6;
+  // Why a database is not dumped (no local storage, excluded, ...).
+  string skipped_reason = 7;
+}
+
+message ConfigFile {
+  uint32 id = 1;
+  string path = 2;
+  uint64 size = 3;
+  // The main configuration file (slapd.conf).
+  bool main = 4;
+}
+
+message InfoResponse {
+  // slapd -VV, e.g. "slapd 2.6.10+dfsg-1".
+  string server_version = 1;
+  ConfigKind kind = 2;
+  // The -F directory or -f file the instance runs with.
+  string config_path = 3;
+  repeated Database databases = 4;
+  // slapd.conf and every include file (recursively), /etc/default/slapd.
+  repeated ConfigFile config_files = 5;
+  // Files named by olcTLS*File / TLS*File: never read by the broker; ofd
+  // warns when the FileSet does not back them up with a File = line.
+  repeated string tls_files = 6;
+  // Kinds of secrets the configuration holds ("rootpw",
+  // "syncrepl-credentials", "idassert-credentials", "acl-passwd"): names
+  // only, never values.
+  repeated string secret_kinds = 7;
+  // Set by the host in the answer to the guest: config=yes.
+  bool config_selected = 8;
+}
+
+// slapcat of the configuration (slapd.d only: -n 0) or of one database.
+message ConfigDump {}
+message DumpOpenRequest {
+  oneof what {
+    ConfigDump config = 1;
+    string suffix = 2;
+  }
+}
+message DumpOpenResponse { uint32 handle = 1; }
+
+// One configuration file by the id of the info list (read with dump-read).
+message ConfigFileOpenRequest { uint32 id = 1; }
+
+message DumpReadRequest {
+  uint32 handle = 1;
+  uint32 max_bytes = 2;
+}
+message DumpReadResponse {
+  bytes data = 1;
+  // The stream ended; `exit_ok` tells whether the tool succeeded.
+  bool eof = 2;
+  bool exit_ok = 3;
+  // Filtered: exit status, LDIF line number, known error classes.
+  string diagnostic = 4;
+}
+
+message DumpCloseRequest { uint32 handle = 1; }
+message DumpCloseResponse {}
+
+// Online restore (openldap.write), guest -> host.
+message ConfigFileLoad {
+  // The file's original absolute path; the host stores it below the target.
+  string path = 1;
+  bool main = 2;
+}
+message LoadOpenRequest {
+  oneof what {
+    // slapd.d: the cn=config LDIF (slapadd -n 0 after the host rewrote it).
+    ConfigDump config = 1;
+    // slapd.conf: one configuration file.
+    ConfigFileLoad config_file = 2;
+    // One database's LDIF (slapadd -b <suffix> -q).
+    string suffix = 3;
+  }
+}
+message LoadOpenResponse { uint32 handle = 1; }
+message LoadWriteRequest {
+  uint32 handle = 1;
+  bytes data = 2;
+}
+message LoadWriteResponse {}
+message LoadCloseRequest {
+  uint32 handle = 1;
+  bool abort = 2;
+}
+message LoadCloseResponse {
+  bool ok = 1;
+  string diagnostic = 2;
+  // The restore target (set by the host).
+  string target = 3;
+}
+
+// host -> broker: slapadd against a configuration inside the target.
+message BrokerLoadOpen {
+  oneof against {
+    string config_dir = 1;
+    string config_file = 2;
+  }
+  oneof what {
+    // slapadd -n 0 (only with config_dir).
+    ConfigDump config = 3;
+    string suffix = 4;
+  }
+}
+
+message BrokerRequest {
+  oneof request {
+    InfoRequest info = 1;
+    DumpOpenRequest dump_open = 2;
+    ConfigFileOpenRequest config_file_open = 3;
+    DumpReadRequest dump_read = 4;
+    DumpCloseRequest dump_close = 5;
+    BrokerLoadOpen load_open = 6;
+    LoadWriteRequest load_write = 7;
+    LoadCloseRequest load_close = 8;
+  }
+}
+message BrokerError { string message = 1; }
+message BrokerResponse {
+  oneof response {
+    InfoResponse info = 1;
+    DumpOpenResponse dump_open = 2;
+    DumpReadResponse dump_read = 4;
+    DumpCloseResponse dump_close = 5;
+    LoadOpenResponse load_open = 6;
+    LoadWriteResponse load_write = 7;
+    LoadCloseResponse load_close = 8;
+    BrokerError error = 15;
+  }
+}
