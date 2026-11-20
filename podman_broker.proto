@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.filed.broker.podman.v1;
+
+// The Podman broker of the signed "podman" plugin
+// (docs/plans/PODMAN-PLUGIN.md, "Broker und Rootful-Backend"). Two hops use
+// these messages:
+//
+// guest -> host: the WIT imports onesimus:filed-plugin/podman (grant
+//   "podman.inventory": engine-identify, inventory, inspect, member-state)
+//   and onesimus:filed-plugin/podman-volume (grant "podman.volume.read":
+//   volume-scan). Each function takes and returns one encoded message. The
+//   host links them only for the plugin id org.onesimus.podman with
+//   api_version 2, decides the allowed object set, filters every answer
+//   through a positive list and hands out scan references (source_ref)
+//   instead of bytes or attributes.
+// host -> broker: frames on the broker's fd 0/1, each a 4-byte big-endian
+//   length and a BrokerRequest / BrokerResponse, at most 2 MiB.
+//
+// The rootless broker runs as the account's uid inside a user and mount
+// namespace owned by root and delivers metadata only (podman ... --format
+// json, quadlet -dryrun -user). It never delivers bytes or attributes of
+// volume files or image layers: the host reads those itself. Everything the
+// broker reports is the account's claim and is checked by the host. The
+// rootful profile (user=root) has no broker; ofd answers the same requests
+// with fixed logic. There is no free-form path, command or option: every
+// request selects one fixed argument list.
+
+// Object kinds of podman inspect.
+enum ObjectKind {
+  OBJECT_KIND_UNSPECIFIED = 0;
+  OBJECT_KIND_CONTAINER = 1;
+  OBJECT_KIND_POD = 2;
+  OBJECT_KIND_NETWORK = 3;
+  OBJECT_KIND_VOLUME = 4;
+  OBJECT_KIND_IMAGE = 5;
+  OBJECT_KIND_SECRET = 6;
+}
+
+// Fixed error classes; a broker never passes on the stderr of podman.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  // podman exited non-zero (exit status in BrokerError.exit_status).
+  ERROR_CODE_TOOL_FAILED = 1;
+  // The answer exceeded its size limit (1 MiB per inspect).
+  ERROR_CODE_TOO_LARGE = 2;
+  // The request is malformed or not allowed for this broker.
+  ERROR_CODE_REFUSED = 3;
+  // podman could not be started.
+  ERROR_CODE_NOT_STARTED = 4;
+}
+
+// engine-identify: podman info and podman version, --format json.
+message EngineIdentifyRequest {}
+message EngineIdentifyResponse {
+  // Raw JSON from the broker (host side) or the positive-list filtered
+  // JSON (answer to the guest).
+  bytes info_json = 1;
+  bytes version_json = 2;
+}
+
+// inventory: ps -a, pod ps, network ls, volume ls, images, secret ls.
+message InventoryRequest {}
+message InventoryResponse {
+  bytes containers_json = 1;
+  bytes pods_json = 2;
+  bytes networks_json = 3;
+  bytes volumes_json = 4;
+  bytes images_json = 5;
+  bytes secrets_json = 6;
+}
+
+// inspect(kind, ids); never --showsecret. With spec = true the broker runs
+// podman generate spec for containers or pods instead.
+message InspectRequest {
+  ObjectKind kind = 1;
+  repeated string ids = 2;
+  bool spec = 3;
+}
+message InspectResponse { bytes json = 1; }
+
+// quadlet -dryrun [-user]: used by the host for the mapping only, never
+// stored or passed to the guest.
+message QuadletResolveRequest {}
+message QuadletResolveResponse { bytes output = 1; }
+
+// member-state (guest, read only): the state of a member of the object set.
+message MemberStateRequest { string id = 1; }
+message MemberStateResponse {
+  string id = 1;
+  string state = 2;
+}
+
+// volume-scan (guest -> host only, grant podman.volume.read): the host scans
+// the volume's _data itself (openat2 RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS |
+// RESOLVE_NO_XDEV from the graphroot of the account policy) and answers
+// with references. The guest learns path, kind and size, never attributes.
+message VolumeScanRequest {
+  string volume = 1;
+  // Index of the first entry wanted; 0 starts the scan.
+  uint32 cursor = 2;
+}
+message ScanEntry {
+  // Path relative to the volume's data/ directory; empty for data/ itself.
+  bytes relpath = 1;
+  // onesimus.filed.plugin.v1.FileKind as a number.
+  int32 kind = 2;
+  uint64 size = 3;
+  // Reference for FileEntry.source_ref: once, this job, this instance.
+  bytes source_ref = 4;
+}
+message Rejected {
+  bytes relpath = 1;
+  // Fixed reason: "device", "socket", "id-outside-map", "acl-id-outside-map".
+  string reason = 2;
+}
+message VolumeScanResponse {
+  repeated ScanEntry entries = 1;
+  // The scan is complete: rejected entries and the reference of the
+  // ownership.tsv the host generated are set in the last answer.
+  bool done = 2;
+  uint32 next_cursor = 3;
+  repeated Rejected rejected = 4;
+  bytes ownership_ref = 5;
+  uint64 ownership_size = 6;
+}
+
+message BrokerRequest {
+  oneof request {
+    EngineIdentifyRequest engine_identify = 1;
+    InventoryRequest inventory = 2;
+    InspectRequest inspect = 3;
+    QuadletResolveRequest quadlet_resolve = 4;
+  }
+}
+message BrokerError {
+  ErrorCode code = 1;
+  // A fixed text of the broker, never tool output.
+  string message = 2;
+  int32 exit_status = 3;
+}
+message BrokerResponse {
+  oneof response {
+    EngineIdentifyResponse engine_identify = 1;
+    InventoryResponse inventory = 2;
+    InspectResponse inspect = 3;
+    QuadletResolveResponse quadlet_resolve = 4;
+    BrokerError error = 15;
+  }
+}
