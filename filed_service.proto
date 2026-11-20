@@ -2,12 +2,21 @@
 syntax = "proto3";
 package onesimus.filed;
 
-// Stateful Director/File Daemon control connection. File contents continue to
-// travel directly between File Daemon and Storage Daemon over BNET.
+// Stateful Director/File Daemon control connection. File contents travel
+// between File Daemon and Storage Daemon: to an Onesimus Storage Daemon over
+// onesimus.stored.StorageDaemon/Data (active client) or FileDaemon/Data
+// (passive client), to a Bareos Storage Daemon over BNET.
 // The existing Hello and mutual CRAM authentication run inside this TLS stream;
 // no command is executed before authentication succeeds.
 service FileDaemon {
+  // Director <-> FD control connection ("Hello Director <name> calling").
   rpc Control(stream ControlFrame) returns (stream ControlFrame);
+
+  // Storage Daemon -> FD data connection of one job (passive client,
+  // Client "Passive = yes"): "Hello Storage calling Start Job <Job>",
+  // CRAM-MD5 with the job's authorization key, then the records. Only that
+  // Hello is accepted here.
+  rpc Data(stream ControlFrame) returns (stream ControlFrame);
 }
 
 // Preserve control message boundaries, binary restore objects and flow-control
