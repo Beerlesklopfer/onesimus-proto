@@ -1311,7 +1311,13 @@ message PurgeTargetCommand {
   bool allpools = 9  [(onesimus.bare_flag) = true];
   uint32 drive = 10;
   string devicetype = 11;
-  bool confirm = 12;           // muss true sein (zerstoerend)
+  bool confirm = 12;           // muss true sein (zerstoerend); bei all ohne dryrun Pflicht
+  // Onesimus-Erweiterung "purge volume all" (mehrere Volumes, Pflicht-Vorschau):
+  // all waehlt die Form, dazu pool oder allpools, optional volstatus, und
+  // genau eins von dryrun (aendert nichts, kein confirm noetig) oder confirm (= yes).
+  bool all = 13  [(onesimus.bare_flag) = true];
+  string volstatus = 14;       // VolStatus-Filter, durch Komma getrennt (Vorgabe Full,Used,Error)
+  bool dryrun = 15  [(onesimus.bare_flag) = true];
 }
 
 // update volume=<name> <eigenschaften> | update volume allfrompool=<pool>
