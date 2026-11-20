@@ -9,7 +9,8 @@ Director stays wire-compatible with the Bareos console protocol (bconsole,
 Bareos WebUI), while this repository defines the Onesimus gRPC API.
 
 Protobuf packages: `onesimus` (custom options), `onesimus.director`,
-`onesimus.director.commands`, `onesimus.director.api`, `onesimus.ccc`.
+`onesimus.director.commands`, `onesimus.director.api`, `onesimus.ccc`,
+`onesimus.filed`, `onesimus.stored`.
 
 ## Files
 
@@ -20,6 +21,8 @@ Protobuf packages: `onesimus` (custom options), `onesimus.director`,
 | `director_commands.proto` | 88 command definitions with parameter schemas (`onesimus.director.commands`) |
 | `onesimus_options.proto` | Custom protobuf options for command metadata (`(onesimus.command_name)`, `(onesimus.help_text)`, `(onesimus.usage)`, `(onesimus.bare_flag)`, …) |
 | `plugin_ccc.proto` | Cross-cutting plugin interfaces shared by FD/SD/DIR (`onesimus.ccc`) |
+| `filed_service.proto` | File Daemon service `onesimus.filed.FileDaemon`: `Control` (Director ↔ FD) and `Data` (Storage Daemon → FD, passive client); BNET messages in `ControlFrame` |
+| `stored_service.proto` | Storage Daemon service `onesimus.stored.StorageDaemon`: `Control` (Director ↔ SD) and `Data` (File Daemon → SD, active client); BNET messages in `StoredFrame` |
 
 ## Typed Director API (`director_api.proto`)
 

@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+syntax = "proto3";
+package onesimus.stored;
+
+// Onesimus Storage Daemon (osd) connections over gRPC with TLS, the primary
+// path between the Onesimus Director (odir), the Onesimus File Daemon (ofd)
+// and osd. BNET on the SD port stays as the fallback for bareos-dir and
+// bareos-fd (osd --disable-grpc offers BNET only).
+//
+// Like onesimus.filed.FileDaemon, both RPCs carry the same BNET messages as
+// the SD port, one message per frame and without BNET length headers, so
+// the Bareos Hello, the mutual CRAM-MD5 authentication and every command
+// run unchanged inside the TLS stream. No command is executed before the
+// authentication succeeds. Onesimus-only extensions (branches, media
+// events, stripe information) will be added here as typed messages later;
+// they are not part of this version.
+service StorageDaemon {
+  // Director <-> SD control connection: "Hello Director <name> calling",
+  // CRAM-MD5 with the Storage password, then job setup (JobId=, use
+  // storage, bootstrap, passive client, run), catalog requests of the SD
+  // (CatReq, UpdCat, Jmsg, Status) and the device commands (status, label,
+  // mount, unmount, release, cancel).
+  rpc Control(stream StoredFrame) returns (stream StoredFrame);
+
+  // File Daemon -> SD data connection of one job (active client):
+  // "Hello Start Job <Job>", CRAM-MD5 with the job's authorization key,
+  // then the append (backup) or read (restore, verify) session with its
+  // records. Only that Hello is accepted here.
+  rpc Data(stream StoredFrame) returns (stream StoredFrame);
+}
+
+// One BNET message: data (binary records, command lines) or a BNET signal
+// (EOD, TERMINATE, ...; always negative). Field numbers and types are those
+// of onesimus.filed.ControlFrame, so one transport adapter serves both.
+message StoredFrame {
+  oneof frame {
+    bytes payload = 1;
+    int32 signal = 2;
+  }
+}
