@@ -10,7 +10,7 @@ package onesimus.filed.broker.podman.v1;
 //   "podman.inventory": engine-identify, inventory, inspect, member-state)
 //   and onesimus:filed-plugin/podman-volume (grant "podman.volume.read":
 //   volume-scan). Each function takes and returns one encoded message. The
-//   host links them only for the plugin id org.onesimus.podman with
+//   host links them only for the plugin id io.onesimus.podman with
 //   api_version 2, decides the allowed object set, filters every answer
 //   through a positive list and hands out scan references (source_ref)
 //   instead of bytes or attributes.
