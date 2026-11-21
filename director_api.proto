@@ -49,6 +49,7 @@ package onesimus.director.api;
 
 import "onesimus_options.proto";
 import "director_commands.proto";
+import "usage.proto";
 import "google/protobuf/struct.proto";
 
 // ==========================================================================
@@ -1881,6 +1882,7 @@ message DirectorStatusResponse {
   repeated TerminatedJobInfo terminated = 4;
   repeated ClientConnectionInfo client_connection = 5;
   string text = 6;               // nur Textanteile (z.B. status all)
+  onesimus.director.usage.UsageInfo usage = 7;  // free tier usage and licence (GetDirectorStatus)
 }
 
 message ScheduleJobInfo {

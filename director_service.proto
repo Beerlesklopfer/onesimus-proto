@@ -8,6 +8,8 @@
 syntax = "proto3";
 package onesimus.director;
 
+import "usage.proto";
+
 // ==========================================================================
 // Director gRPC Service
 // ==========================================================================
@@ -187,6 +189,12 @@ message JobStatusEvent {
   int64 sched_time = 5;    // unix timestamp der geplanten Startzeit, 0 = unbekannt
 }
 
+// Sent right after login on the push stream and on every change of state,
+// month or licence.
+message UsageEvent {
+  onesimus.director.usage.UsageInfo usage = 1;
+}
+
 // Wrapper for all push events (server -> client via InteractiveSession)
 message PushEvent {
   oneof event {
@@ -198,6 +206,7 @@ message PushEvent {
     SdDisconnectedEvent sd_disconnected = 6;
     SdStatusEvent sd_status = 7;
     JobStatusEvent job_status = 8;
+    UsageEvent usage = 9;
   }
 }
 

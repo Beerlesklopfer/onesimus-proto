@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Onesimus - https://onesimus.io
+//
+// Copyright (C) 2025-2026 Jörg Bernau <Joerg.Bernau@onesimus.io>
+//
+// Usage of the month and licence state of a Director, shared by the
+// Director service (push event UsageEvent) and the typed Director API
+// (DirectorStatusResponse.usage).
+
+syntax = "proto3";
+package onesimus.director.usage;
+
+// Usage of the month and licence state (free tier, onesimus-dird
+// docs/plans/FREE-TIER-LIZENZ.md). bytes_written comes from the catalog
+// function onesimus.fn_usage_month (backup jobs without VirtualFull, by
+// StartTime, Director time zone); bytes_running from the running counted jobs.
+enum UsageState {
+  USAGE_STATE_UNSPECIFIED = 0;
+  USAGE_STATE_OK = 1;        // below 80 % of the limit, or no limit
+  USAGE_STATE_NEAR = 2;      // >= 80 %
+  USAGE_STATE_REACHED = 3;   // >= 100 %: new backup jobs are held
+}
+
+enum LicenceKind {
+  LICENCE_KIND_UNSPECIFIED = 0;
+  LICENCE_KIND_FREE = 1;      // no licence file: free tier
+  LICENCE_KIND_LICENSED = 2;  // valid signed licence file
+  LICENCE_KIND_EXPIRED = 3;   // licence file expired: free tier applies
+  LICENCE_KIND_INVALID = 4;   // signature, format or Director binding wrong: free tier applies
+}
+
+message LicenceInfo {
+  LicenceKind kind = 1;
+  string customer = 2;
+  string licence_id = 3;
+  int64 valid_until = 4;       // unix timestamp, 0 = none
+  string message = 5;          // reason for EXPIRED/INVALID
+}
+
+message UsageInfo {
+  string month = 1;                 // "2026-11", Director time zone
+  uint64 bytes_written = 2;         // finished backup jobs of the month (catalog)
+  uint64 limit_bytes = 3;           // 0 = unlimited
+  UsageState state = 4;             // computed from bytes_written + bytes_running
+  int64 resets_at = 5;              // unix timestamp of the next month start
+  LicenceInfo licence = 6;
+  uint64 bytes_running = 7;         // written so far by running counted jobs
+  uint32 held_jobs_this_month = 8;  // scheduled jobs skipped because of the limit
+}
+
